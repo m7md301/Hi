@@ -1,5 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "steep-bread-85a3",
-  "main": "src/index.ts"
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"]
 }
