@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "wrangler deploy --config ./wrangler.toml --dry-run --compatibility-date 2026-10-01",
-    "deploy": "wrangler deploy --config ./wrangler.toml --compatibility-date 2026-10-01"
+    "build": "wrangler deploy --config=./wrangler.toml --dry-run --compatibility-date=2026-10-01",
+    "deploy": "wrangler deploy --config=./wrangler.toml --compatibility-date=2026-10-01"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
