@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "npm run typecheck",
-    "deploy": "npx wrangler deploy --config ./wrangler.jsonc --compatibility-date 2026-10-01"
+    "build": "npm run typecheck && npx wrangler deploy --config ./wrangler.jsonc --dry-run --outdir dist",
+    "deploy": "npx wrangler deploy --config ./wrangler.jsonc --compatibility-date 2026-10-01 --var COMMIT_SHA:$(git rev-parse HEAD)"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
