@@ -5,6 +5,8 @@ import { z } from "zod";
 type Env = { XKIRO_API_KEY?: string; MCP_ACCESS_TOKEN?: string };
 const XKIRO_API = "https://api.xkiro.com";
 const DEFAULT_MODEL = "sensenova/sensenova-u1.5-lite";
+const SUPPORTED_MODELS = ["sensenova/sensenova-u1.5-lite", "openai/gpt-image-2.5"] as const;
+const modelField = z.enum(SUPPORTED_MODELS).optional().describe("Model to use: sensenova/sensenova-u1.5-lite (default, fast) or openai/gpt-image-2.5 (higher quality)");
 
 function equal(a: string, b: string) { if (a.length !== b.length) return false; let difference = 0; for (let i = 0; i < a.length; i++) difference |= a.charCodeAt(i) ^ b.charCodeAt(i); return difference === 0; }
 function authorized(request: Request, env: Env) {
@@ -32,15 +34,15 @@ async function editImage(env: Env, args: { image_url: string; prompt: string; mo
   const text = await response.text(); let data: unknown; try { data = JSON.parse(text); } catch { data = { raw: text }; } if (!response.ok) throw new Error(`xKiro edit HTTP ${response.status}: ${JSON.stringify(data)}`); return data;
 }
 function createServer(env: Env): McpServer {
-  const server = new McpServer({ name: "xkiro-mcp", version: "2.0.1" });
-  server.registerTool("generate_image", { description: "Submit an asynchronous image-generation job to xKiro.", inputSchema: { prompt: z.string().min(1), model: z.string().optional(), n: z.number().optional(), size: z.string().optional(), style: z.string().optional() } }, async ({ prompt, model, n, size, style }) => ({ content: [{ type: "text", text: JSON.stringify(await xKiroJson(env, "/v1/images/generations", { method: "POST", body: JSON.stringify({ prompt, model: model ?? DEFAULT_MODEL, n, size, style }) })) }] }));
-  server.registerTool("edit_image", { description: "Edit an existing image from an HTTPS image URL.", inputSchema: { image_url: z.string().url(), prompt: z.string().min(1), model: z.string().optional(), size: z.string().optional(), n: z.number().optional() } }, async args => ({ content: [{ type: "text", text: JSON.stringify(await editImage(env, args)) }] }));
+  const server = new McpServer({ name: "xkiro-mcp", version: "2.1.0" });
+  server.registerTool("generate_image", { description: "Submit an asynchronous image-generation job to xKiro. Model selectable: sensenova/sensenova-u1.5-lite (default) or openai/gpt-image-2.5.", inputSchema: { prompt: z.string().min(1), model: modelField, n: z.number().optional(), size: z.string().optional(), style: z.string().optional() } }, async ({ prompt, model, n, size, style }) => ({ content: [{ type: "text", text: JSON.stringify(await xKiroJson(env, "/v1/images/generations", { method: "POST", body: JSON.stringify({ prompt, model: model ?? DEFAULT_MODEL, n, size, style }) })) }] }));
+  server.registerTool("edit_image", { description: "Edit an existing image from an HTTPS image URL. Model selectable: sensenova/sensenova-u1.5-lite (default) or openai/gpt-image-2.5.", inputSchema: { image_url: z.string().url(), prompt: z.string().min(1), model: modelField, size: z.string().optional(), n: z.number().optional() } }, async args => ({ content: [{ type: "text", text: JSON.stringify(await editImage(env, args)) }] }));
   server.registerTool("get_image_job", { description: "Retrieve an xKiro image-generation job by id.", inputSchema: { id: z.string().min(1) } }, async ({ id }) => ({ content: [{ type: "text", text: JSON.stringify(await xKiroJson(env, `/v1/images/generations/${encodeURIComponent(id)}`)) }] }));
   server.registerTool("list_image_jobs", { description: "List recent xKiro image-generation jobs.", inputSchema: { before: z.string().optional() } }, async ({ before }) => ({ content: [{ type: "text", text: JSON.stringify(await xKiroJson(env, `/v1/images/generations${before ? `?before=${encodeURIComponent(before)}` : ""}`)) }] }));
   return server;
 }
 export default { fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  const pathname = new URL(request.url).pathname; if (pathname === "/health") return Promise.resolve(new Response(JSON.stringify({ status: "ok", version: "2.0.1" }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } }));
+  const pathname = new URL(request.url).pathname; if (pathname === "/health") return Promise.resolve(new Response(JSON.stringify({ status: "ok", version: "2.1.0" }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } }));
   if (pathname !== "/mcp" && pathname !== "/mcp/") return Promise.resolve(new Response("Not found", { status: 404 }));
   if (!env.MCP_ACCESS_TOKEN) return Promise.resolve(new Response(JSON.stringify({ error: "MCP_ACCESS_TOKEN is not configured" }), { status: 503, headers: { "Content-Type": "application/json" } }));
   if (request.method !== "OPTIONS" && !authorized(request, env)) return Promise.resolve(new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json", "WWW-Authenticate": "Bearer" } }));
