@@ -52,6 +52,6 @@ function createServer(env: Env) {
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext) {
     if (new URL(request.url).pathname !== "/mcp") return new Response("xKiro MCP server", { status: 200 });
-    return createMcpHandler(createServer(env))(request, env, ctx);
+    return createMcpHandler(() => createServer(env))(request, env, ctx);
   }
 };
