@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler } from "agents/mcp/server";
 import { z } from "zod";
 
-type Env = { XKIRO_API_KEY?: string; MCP_ACCESS_TOKEN?: string };
+type Env = { XKIRO_API_KEY?: string; MCP_ACCESS_TOKEN?: string; UPLOADS?: any };
 const XKIRO_API = "https://api.xkiro.com";
 const DEFAULT_MODEL = "sensenova/sensenova-u1.5-lite";
 const SUPPORTED_MODELS = ["sensenova/sensenova-u1.5-lite", "openai/gpt-image-2.5"] as const;
@@ -41,8 +41,54 @@ function createServer(env: Env): McpServer {
   server.registerTool("list_image_jobs", { description: "List recent xKiro image-generation jobs.", inputSchema: { before: z.string().optional() } }, async ({ before }) => ({ content: [{ type: "text", text: JSON.stringify(await xKiroJson(env, `/v1/images/generations${before ? `?before=${encodeURIComponent(before)}` : ""}`)) }] }));
   return server;
 }
+// ---- isolated sidecar: same-domain upload, no effect on /mcp if missing/broken ----
+function uploadFormHtml(): string {
+  return `<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>رفع صورة</title><body style="font-family:system-ui;padding:24px;max-width:520px;margin:auto"><h3>رفع صورة مؤقتة (نفس الدومين)</h3><p>اختر صورة ثم ارفع. ستحصل على رابط https://.../uploads/... الصقه هنا للتعديل.</p><form method="post" enctype="multipart/form-data"><input type="file" name="file" accept="image/jpeg,image/png,image/webp,image/gif" required><br><br><button type="submit">رفع</button></form><p style="color:#666;font-size:13px">يتطلب نفس كلمة سر MCP في ترويسة Authorization عند POST. GET للعرض عام.</p></body></html>`;
+}
+async function handleSidecar(request: Request, env: Env, url: URL): Promise<Response> {
+  const pathname = url.pathname;
+  if (pathname === "/upload" || pathname === "/upload/") {
+    if (request.method === "GET") return new Response(uploadFormHtml(), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key, X-MCP-Password, MCP-Access-Token" } });
+    if (request.method !== "POST") return new Response(JSON.stringify({ error: "Method not allowed, use POST" }), { status: 405, headers: { "Content-Type": "application/json" } });
+    if (!authorized(request, env)) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
+    if (!env.UPLOADS) return new Response(JSON.stringify({ error: "UPLOADS R2 not bound yet. /mcp still works. Create R2 bucket hi-uploads and bind UPLOADS to enable.", mcp_ok: true }), { status: 503, headers: { "Content-Type": "application/json" } });
+    let form: FormData; try { form = await request.formData(); } catch { return new Response(JSON.stringify({ error: "Expected multipart/form-data with field file" }), { status: 400, headers: { "Content-Type": "application/json" } }); }
+    const f = form.get("file") ?? form.get("image");
+    if (!(f instanceof File)) return new Response(JSON.stringify({ error: "Missing file field named file" }), { status: 400, headers: { "Content-Type": "application/json" } });
+    const ct = (f.type || "").split(";")[0].toLowerCase();
+    if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(ct)) return new Response(JSON.stringify({ error: "Unsupported content-type, use jpeg/png/webp/gif" }), { status: 400, headers: { "Content-Type": "application/json" } });
+    if (f.size <= 0 || f.size > 20 * 1024 * 1024) return new Response(JSON.stringify({ error: "File size must be 1B..20MB" }), { status: 400, headers: { "Content-Type": "application/json" } });
+    const ext = ct === "image/jpeg" ? "jpg" : ct.split("/")[1];
+    const now = new Date(); const ym = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    const rand = Math.random().toString(16).slice(2, 10);
+    const key = `${ym}/${Date.now()}-${rand}.${ext}`;
+    await env.UPLOADS.put(key, f.stream(), { httpMetadata: { contentType: ct }, customMetadata: { uploadedAt: new Date().toISOString() } });
+    const publicUrl = `https://${url.host}/uploads/${key}`;
+    return new Response(JSON.stringify({ url: publicUrl, key, contentType: ct, size: f.size, usage: "Paste url into edit_image image_url" }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+  }
+  if (pathname.startsWith("/uploads/")) {
+    if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
+    if (!env.UPLOADS) return new Response("Uploads not enabled yet", { status: 503 });
+    const key = pathname.slice("/uploads/".length);
+    if (!key || key.includes("..") || key.length > 512) return new Response("Not found", { status: 404 });
+    const obj = await env.UPLOADS.get(key);
+    if (!obj) return new Response("Not found", { status: 404 });
+    const headers = new Headers();
+    headers.set("Content-Type", obj.httpMetadata?.contentType ?? "application/octet-stream");
+    headers.set("Cache-Control", "public, max-age=31536000, immutable");
+    headers.set("Access-Control-Allow-Origin", "*");
+    if (request.method === "HEAD") return new Response(null, { headers });
+    return new Response(obj.body, { headers });
+  }
+  return new Response("Not found", { status: 404 });
+}
 export default { fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  const pathname = new URL(request.url).pathname; if (pathname === "/health") return Promise.resolve(new Response(JSON.stringify({ status: "ok", version: "2.1.0" }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } }));
+  const pathname = new URL(request.url).pathname;
+  if (pathname === "/upload" || pathname === "/upload/" || pathname.startsWith("/uploads/")) {
+    try { return handleSidecar(request, env, new URL(request.url)); } catch (e) { return Promise.resolve(new Response(JSON.stringify({ error: String((e as Error)?.message ?? e), mcp_ok: true }), { status: 500, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } })); }
+  }
+  if (pathname === "/health") return Promise.resolve(new Response(JSON.stringify({ status: "ok", version: "2.1.0" }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } }));
   if (pathname !== "/mcp" && pathname !== "/mcp/") return Promise.resolve(new Response("Not found", { status: 404 }));
   if (!env.MCP_ACCESS_TOKEN) return Promise.resolve(new Response(JSON.stringify({ error: "MCP_ACCESS_TOKEN is not configured" }), { status: 503, headers: { "Content-Type": "application/json" } }));
   if (request.method !== "OPTIONS" && !authorized(request, env)) return Promise.resolve(new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json", "WWW-Authenticate": "Bearer" } }));
