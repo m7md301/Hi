@@ -51,7 +51,7 @@ function json(data: unknown, status = 200) {
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, x-api-key, MCP-Protocol-Version, Mcp-Method, Mcp-Name, mcp-session-id",
+      "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, x-api-key, X-MCP-Password, MCP-Protocol-Version, Mcp-Method, Mcp-Name, mcp-session-id",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Expose-Headers": "MCP-Protocol-Version, mcp-session-id"
     }
@@ -62,12 +62,31 @@ function error(id: JsonRpcRequest["id"], code: number, message: string) {
   return json({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
 }
 
+function constantTimeEqual(a: string, b: string) {
+  if (a.length !== b.length) return false;
+  let difference = 0;
+  for (let i = 0; i < a.length; i++) difference |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return difference === 0;
+}
+
 function authorized(request: Request, env: Env) {
   const expected = env.MCP_ACCESS_TOKEN;
   if (!expected) return false;
-  const bearer = request.headers.get("Authorization");
-  const supplied = bearer?.match(/^Bearer\s+(.+)$/i)?.[1] ?? request.headers.get("x-api-key");
-  return supplied === expected;
+  const authorization = request.headers.get("Authorization") ?? "";
+  const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
+  if (bearer && constantTimeEqual(bearer, expected)) return true;
+  const basic = authorization.match(/^Basic\s+(.+)$/i)?.[1];
+  if (basic) {
+    try {
+      const decoded = atob(basic);
+      const password = decoded.includes(":") ? decoded.slice(decoded.indexOf(":") + 1) : decoded;
+      if (constantTimeEqual(password, expected)) return true;
+    } catch { /* malformed Basic header */ }
+  }
+  const apiKey = request.headers.get("x-api-key");
+  if (apiKey && constantTimeEqual(apiKey, expected)) return true;
+  const mcpPassword = request.headers.get("X-MCP-Password");
+  return !!mcpPassword && constantTimeEqual(mcpPassword, expected);
 }
 
 async function callXkiro(env: Env, path: string, init?: RequestInit): Promise<unknown> {
@@ -93,22 +112,18 @@ async function editImage(env: Env, args: Record<string, unknown>) {
   if (typeof imageUrl !== "string" || !/^https?:\/\//i.test(imageUrl)) throw new Error("image_url must be an http(s) URL");
   if (typeof prompt !== "string" || !prompt) throw new Error("prompt is required");
   if (typeof model !== "string" || !model) throw new Error("model is required");
-
-  // The image is streamed/fetched only for this request and is not persisted by the Worker.
   const source = await fetch(imageUrl);
   if (!source.ok) throw new Error(`Could not fetch source image: HTTP ${source.status}`);
   const contentType = source.headers.get("content-type")?.split(";")[0].toLowerCase() ?? "";
   if (!["image/jpeg", "image/png", "image/gif", "image/webp"].includes(contentType)) throw new Error("source URL did not return a supported image");
   const bytes = await source.arrayBuffer();
   const extension = contentType.split("/")[1] === "jpeg" ? "jpg" : contentType.split("/")[1];
-
   const form = new FormData();
   form.append("image", new Blob([bytes], { type: contentType }), `source.${extension}`);
   form.append("prompt", prompt);
   form.append("model", model);
   if (typeof args.size === "string") form.append("size", args.size);
   if (typeof args.n === "number") form.append("n", String(args.n));
-
   const response = await fetch(`${XKIRO_API}/v1/images/edits`, {
     method: "POST", headers: { Authorization: `Bearer ${env.XKIRO_API_KEY}` }, body: form
   });
@@ -128,13 +143,12 @@ async function handleMcp(request: Request, env: Env): Promise<Response> {
   if (request.method !== "POST") return error(null, -32000, "Method not allowed.");
   if (!env.MCP_ACCESS_TOKEN) return json({ error: "MCP_ACCESS_TOKEN is not configured" }, 503);
   if (!authorized(request, env)) return json({ error: "Unauthorized" }, 401);
-
   let rpc: JsonRpcRequest;
   try { rpc = await request.json() as JsonRpcRequest; } catch { return error(null, -32700, "Parse error"); }
   const id = rpc.id ?? null;
   try {
     switch (rpc.method) {
-      case "initialize": return result(id, { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "xkiro-mcp", version: "1.1.0" } });
+      case "initialize": return result(id, { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "xkiro-mcp", version: "1.2.0" } });
       case "notifications/initialized": return new Response(null, { status: 202 });
       case "ping": return result(id, {});
       case "tools/list": return result(id, { tools });
