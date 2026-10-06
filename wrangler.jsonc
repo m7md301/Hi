@@ -3,5 +3,11 @@
   "name": "steep-bread-85a3",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
-  "compatibility_flags": ["nodejs_compat"]
+  "compatibility_flags": ["nodejs_compat"],
+  "r2_buckets": [
+    {
+      "binding": "UPLOADS",
+      "bucket_name": "hi-uploads"
+    }
+  ]
 }
