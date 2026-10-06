@@ -1,4 +1,4 @@
-# xKiro MCP on Cloudflare Workers
+# xkiro-mcp on Cloudflare Workers
 
 ## Architecture
 
@@ -31,3 +31,5 @@ npm install
 npm run typecheck
 npm run build
 ```
+
+<!-- Cloudflare Workers Build trigger: use the current main commit. -->
