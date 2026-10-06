@@ -1,6 +1,5 @@
 type Env = { XKIRO_API_KEY?: string; MCP_ACCESS_TOKEN?: string };
 const XKIRO_API = "https://api.xkiro.com";
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 type JsonRpcRequest = {
   jsonrpc?: string;
@@ -95,17 +94,15 @@ async function editImage(env: Env, args: Record<string, unknown>) {
   if (typeof prompt !== "string" || !prompt) throw new Error("prompt is required");
   if (typeof model !== "string" || !model) throw new Error("model is required");
 
+  // The image is streamed/fetched only for this request and is not persisted by the Worker.
   const source = await fetch(imageUrl);
   if (!source.ok) throw new Error(`Could not fetch source image: HTTP ${source.status}`);
   const contentType = source.headers.get("content-type")?.split(";")[0].toLowerCase() ?? "";
   if (!["image/jpeg", "image/png", "image/gif", "image/webp"].includes(contentType)) throw new Error("source URL did not return a supported image");
-  const declaredSize = Number(source.headers.get("content-length") ?? 0);
-  if (declaredSize > MAX_IMAGE_BYTES) throw new Error("source image is larger than 10 MB");
   const bytes = await source.arrayBuffer();
-  if (bytes.byteLength > MAX_IMAGE_BYTES) throw new Error("source image is larger than 10 MB");
+  const extension = contentType.split("/")[1] === "jpeg" ? "jpg" : contentType.split("/")[1];
 
   const form = new FormData();
-  const extension = contentType.split("/")[1] === "jpeg" ? "jpg" : contentType.split("/")[1];
   form.append("image", new Blob([bytes], { type: contentType }), `source.${extension}`);
   form.append("prompt", prompt);
   form.append("model", model);
