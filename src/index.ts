@@ -1,5 +1,6 @@
-type Env = { XKIRO_API_KEY?: string };
+type Env = { XKIRO_API_KEY?: string; MCP_ACCESS_TOKEN?: string };
 const XKIRO_API = "https://api.xkiro.com";
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 type JsonRpcRequest = {
   jsonrpc?: string;
@@ -14,26 +15,34 @@ const tools = [
     description: "Submit an image-generation job to xKiro.",
     inputSchema: {
       type: "object",
-      properties: { model: { type: "string" }, prompt: { type: "string" } },
+      properties: {
+        model: { type: "string" }, prompt: { type: "string" },
+        n: { type: "number" }, size: { type: "string" }, style: { type: "string" }
+      },
       required: ["model", "prompt"]
+    }
+  },
+  {
+    name: "edit_image",
+    description: "Edit an existing image using an image URL and an instruction.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        image_url: { type: "string" }, prompt: { type: "string" },
+        model: { type: "string" }, size: { type: "string" }, n: { type: "number" }
+      },
+      required: ["image_url", "prompt", "model"]
     }
   },
   {
     name: "get_image_job",
     description: "Retrieve an xKiro image-generation job by id.",
-    inputSchema: {
-      type: "object",
-      properties: { id: { type: "string" } },
-      required: ["id"]
-    }
+    inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] }
   },
   {
     name: "list_image_jobs",
     description: "List recent xKiro image-generation jobs.",
-    inputSchema: {
-      type: "object",
-      properties: { cursor: { type: "string" } }
-    }
+    inputSchema: { type: "object", properties: { before: { type: "string" } } }
   }
 ];
 
@@ -43,22 +52,32 @@ function json(data: unknown, status = 200) {
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, MCP-Protocol-Version, Mcp-Method, Mcp-Name, mcp-session-id",
+      "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, x-api-key, MCP-Protocol-Version, Mcp-Method, Mcp-Name, mcp-session-id",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Expose-Headers": "MCP-Protocol-Version, mcp-session-id"
     }
   });
 }
 
+function error(id: JsonRpcRequest["id"], code: number, message: string) {
+  return json({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
+}
+
+function authorized(request: Request, env: Env) {
+  const expected = env.MCP_ACCESS_TOKEN;
+  if (!expected) return false;
+  const bearer = request.headers.get("Authorization");
+  const supplied = bearer?.match(/^Bearer\s+(.+)$/i)?.[1] ?? request.headers.get("x-api-key");
+  return supplied === expected;
+}
+
 async function callXkiro(env: Env, path: string, init?: RequestInit): Promise<unknown> {
-  if (!env.XKIRO_API_KEY) throw new Error("Missing XKIRO_API_KEY secret");
+  if (!env.XKIRO_API_KEY) throw new Error("MCP is missing XKIRO_API_KEY");
   const response = await fetch(`${XKIRO_API}${path}`, {
     ...init,
     headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${env.XKIRO_API_KEY}`,
-      ...init?.headers
+      Accept: "application/json", "Content-Type": "application/json",
+      Authorization: `Bearer ${env.XKIRO_API_KEY}`, ...init?.headers
     }
   });
   const text = await response.text();
@@ -68,37 +87,60 @@ async function callXkiro(env: Env, path: string, init?: RequestInit): Promise<un
   return data;
 }
 
+async function editImage(env: Env, args: Record<string, unknown>) {
+  const imageUrl = args.image_url;
+  const prompt = args.prompt;
+  const model = args.model;
+  if (typeof imageUrl !== "string" || !/^https?:\/\//i.test(imageUrl)) throw new Error("image_url must be an http(s) URL");
+  if (typeof prompt !== "string" || !prompt) throw new Error("prompt is required");
+  if (typeof model !== "string" || !model) throw new Error("model is required");
+
+  const source = await fetch(imageUrl);
+  if (!source.ok) throw new Error(`Could not fetch source image: HTTP ${source.status}`);
+  const contentType = source.headers.get("content-type")?.split(";")[0].toLowerCase() ?? "";
+  if (!["image/jpeg", "image/png", "image/gif", "image/webp"].includes(contentType)) throw new Error("source URL did not return a supported image");
+  const declaredSize = Number(source.headers.get("content-length") ?? 0);
+  if (declaredSize > MAX_IMAGE_BYTES) throw new Error("source image is larger than 10 MB");
+  const bytes = await source.arrayBuffer();
+  if (bytes.byteLength > MAX_IMAGE_BYTES) throw new Error("source image is larger than 10 MB");
+
+  const form = new FormData();
+  const extension = contentType.split("/")[1] === "jpeg" ? "jpg" : contentType.split("/")[1];
+  form.append("image", new Blob([bytes], { type: contentType }), `source.${extension}`);
+  form.append("prompt", prompt);
+  form.append("model", model);
+  if (typeof args.size === "string") form.append("size", args.size);
+  if (typeof args.n === "number") form.append("n", String(args.n));
+
+  const response = await fetch(`${XKIRO_API}/v1/images/edits`, {
+    method: "POST", headers: { Authorization: `Bearer ${env.XKIRO_API_KEY}` }, body: form
+  });
+  const text = await response.text();
+  let data: unknown;
+  try { data = JSON.parse(text); } catch { data = { raw: text }; }
+  if (!response.ok) throw new Error(`xKiro edit HTTP ${response.status}`);
+  return data;
+}
+
 function result(id: JsonRpcRequest["id"], value: unknown) {
   return json({ jsonrpc: "2.0", id: id ?? null, result: value });
 }
 
-function error(id: JsonRpcRequest["id"], code: number, message: string) {
-  return json({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
-}
-
 async function handleMcp(request: Request, env: Env): Promise<Response> {
-  if (request.method === "OPTIONS") return json(null, 204);
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": "*" } });
   if (request.method !== "POST") return error(null, -32000, "Method not allowed.");
+  if (!env.MCP_ACCESS_TOKEN) return json({ error: "MCP_ACCESS_TOKEN is not configured" }, 503);
+  if (!authorized(request, env)) return json({ error: "Unauthorized" }, 401);
 
   let rpc: JsonRpcRequest;
-  try { rpc = await request.json() as JsonRpcRequest; }
-  catch { return error(null, -32700, "Parse error"); }
-
+  try { rpc = await request.json() as JsonRpcRequest; } catch { return error(null, -32700, "Parse error"); }
   const id = rpc.id ?? null;
   try {
     switch (rpc.method) {
-      case "initialize":
-        return result(id, {
-          protocolVersion: "2025-11-25",
-          capabilities: { tools: {} },
-          serverInfo: { name: "xkiro-mcp", version: "1.0.0" }
-        });
-      case "notifications/initialized":
-        return new Response(null, { status: 202 });
-      case "ping":
-        return result(id, {});
-      case "tools/list":
-        return result(id, { tools });
+      case "initialize": return result(id, { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "xkiro-mcp", version: "1.1.0" } });
+      case "notifications/initialized": return new Response(null, { status: 202 });
+      case "ping": return result(id, {});
+      case "tools/list": return result(id, { tools });
       case "tools/call": {
         const params = rpc.params ?? {};
         const name = params.name;
@@ -106,22 +148,22 @@ async function handleMcp(request: Request, env: Env): Promise<Response> {
         let data: unknown;
         if (name === "generate_image") {
           if (typeof args.model !== "string" || typeof args.prompt !== "string") return error(id, -32602, "model and prompt are required");
-          data = await callXkiro(env, "/v1/images/generations", { method: "POST", body: JSON.stringify({ model: args.model, prompt: args.prompt }) });
-        } else if (name === "get_image_job") {
+          const body = Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined));
+          data = await callXkiro(env, "/v1/images/generations", { method: "POST", body: JSON.stringify(body) });
+        } else if (name === "edit_image") data = await editImage(env, args);
+        else if (name === "get_image_job") {
           if (typeof args.id !== "string") return error(id, -32602, "id is required");
           data = await callXkiro(env, `/v1/images/generations/${encodeURIComponent(args.id)}`);
         } else if (name === "list_image_jobs") {
-          const cursor = typeof args.cursor === "string" ? `?cursor=${encodeURIComponent(args.cursor)}` : "";
-          data = await callXkiro(env, `/v1/images/generations${cursor}`);
+          const before = typeof args.before === "string" ? `?before=${encodeURIComponent(args.before)}` : "";
+          data = await callXkiro(env, `/v1/images/generations${before}`);
         } else return error(id, -32602, `Unknown tool: ${String(name)}`);
         return result(id, { content: [{ type: "text", text: JSON.stringify(data) }] });
       }
-      default:
-        return error(id, -32601, `Method not found: ${String(rpc.method)}`);
+      default: return error(id, -32601, `Method not found: ${String(rpc.method)}`);
     }
   } catch (cause) {
-    const message = cause instanceof Error ? cause.message : "Internal server error";
-    return result(id, { content: [{ type: "text", text: message }], isError: true });
+    return result(id, { content: [{ type: "text", text: cause instanceof Error ? cause.message : "Tool error" }], isError: true });
   }
 }
 
