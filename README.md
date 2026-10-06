@@ -1,23 +1,28 @@
 # xKiro MCP on Cloudflare Workers
 
+## Architecture
+
+The Worker has one entrypoint only: `src/index.ts`. It uses Cloudflare's official `createMcpHandler` and the Streamable HTTP MCP transport. There is no custom transport layer.
+
 ## Deployment
 
-Cloudflare Workers Builds deploys the `main` branch automatically. The Worker entrypoint is `src/index.ts`.
+Cloudflare Workers Builds deploys the `main` branch automatically.
 
 Required encrypted Worker secrets:
 
 - `XKIRO_API_KEY`: xKiro API key.
 - `MCP_ACCESS_TOKEN`: the password/token used by the MCP client.
 
-Do not put either secret in GitHub or in source files.
+The R2 binding `UPLOADS` is optional and is used by the temporary upload page.
 
-## MCP URL
+## Endpoints
 
-```text
-https://steep-bread-85a3.gacfzv.workers.dev/mcp
-```
+- `POST /mcp` — MCP client endpoint.
+- `GET /health` — health check.
+- `GET /upload` — temporary image upload page.
+- `GET /uploads/...` — temporary uploaded image.
 
-The endpoint uses Cloudflare's official stateless `createMcpHandler` Streamable HTTP implementation. GET is intentionally not a browser page; MCP clients connect using POST. A browser visiting `/mcp` may show an error or method-not-allowed page and that does not test MCP connectivity.
+The MCP endpoint must be tested with a real MCP client using POST. Opening `/mcp` in a browser is not an MCP connectivity test.
 
 ## Local verification
 
@@ -26,5 +31,3 @@ npm install
 npm run typecheck
 npm run build
 ```
-
-Test with MCP Inspector or another Streamable HTTP MCP client. The client must send the token using `Authorization: Bearer <MCP_ACCESS_TOKEN>` or `x-api-key: <MCP_ACCESS_TOKEN>`.
