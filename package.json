@@ -10,7 +10,7 @@
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
     "agents": "0.26.0",
-    "zod": "3.25.76"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20250912.0",

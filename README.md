@@ -1,25 +1,30 @@
-# xKiro MCP Worker
+# xKiro MCP on Cloudflare Workers
 
-Stateless Streamable HTTP MCP server for Cloudflare Workers.
+## Deployment
 
-## Secret
+Cloudflare Workers Builds deploys the `main` branch automatically. The Worker entrypoint is `src/index.ts`.
 
-Add a Cloudflare Worker Secret named `XKIRO_API_KEY`. Never commit the key.
+Required encrypted Worker secrets:
 
-## MCP endpoint
+- `XKIRO_API_KEY`: xKiro API key.
+- `MCP_ACCESS_TOKEN`: the password/token used by the MCP client.
 
-`/mcp`
+Do not put either secret in GitHub or in source files.
 
-## Tools
+## MCP URL
 
-- `generate_image`
-- `get_image_job`
-- `list_image_jobs`
+```text
+https://steep-bread-85a3.gacfzv.workers.dev/mcp
+```
 
-## Sources
+The endpoint uses Cloudflare's official stateless `createMcpHandler` Streamable HTTP implementation. GET is intentionally not a browser page; MCP clients connect using POST. A browser visiting `/mcp` may show an error or method-not-allowed page and that does not test MCP connectivity.
 
-- Cloudflare Remote MCP: https://developers.cloudflare.com/agents/guides/remote-mcp-server
-- Cloudflare handler API: https://developers.cloudflare.com/agents/model-context-protocol/apis/handler-api/
-- xKiro API overview: https://docs.xkiro.com/api/overview/
+## Local verification
 
-The xKiro documentation confirms the image endpoints and asynchronous job model. The exact image payload fields beyond `model` and `prompt` are intentionally passed through `options` until the provider publishes an accessible schema page.
+```bash
+npm install
+npm run typecheck
+npm run build
+```
+
+Test with MCP Inspector or another Streamable HTTP MCP client. The client must send the token using `Authorization: Bearer <MCP_ACCESS_TOKEN>` or `x-api-key: <MCP_ACCESS_TOKEN>`.
