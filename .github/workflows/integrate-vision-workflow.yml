@@ -1,0 +1,53 @@
+name: Integrate vision Workflow
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: ${{ !contains(github.event.head_commit.message, 'integrate vision workflow') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Integrate asynchronous analyze_image
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/index.ts')
+          s = p.read_text()
+          old = 'interface Env { XKIRO_API_KEY?: string; MCP_ACCESS_TOKEN?: string; UPLOADS?: R2Bucket; COMMIT_SHA?: string }'
+          new = 'interface Env { XKIRO_API_KEY?: string; MCP_ACCESS_TOKEN?: string; UPLOADS?: R2Bucket; COMMIT_SHA?: string; VISION_ANALYSIS: Workflow<{ jobId: string; imageUrl?: string; imageBase64?: string; prompt?: string; model?: string; responseFormat?: "text" | "json"; detail?: "low" | "high"; language?: string }> }'
+          if old not in s: raise SystemExit('Env marker not found')
+          s = s.replace(old, new, 1)
+          start = s.index('async function analyze(')
+          end = s.index('async function edit(', start)
+          fn = '''async function analyze(e: Env, r: Request, a: any) {\n  const id = crypto.randomUUID();\n  await e.VISION_ANALYSIS.create({ id, params: { jobId: id, imageUrl: a.image_url, imageBase64: a.image_base64, prompt: a.prompt, model: a.model, responseFormat: a.response_format, detail: a.detail, language: a.language } });\n  return result({ success: true, status: "processing", job_id: id, expires_in_minutes: 30, next_step: "Call get_analysis_job with this job_id." });\n}\n'''
+          s = s[:start] + fn + s[end:]
+          old_call = 'createMcpHandler(() => server(e, r))(r, e, c)'
+          new_call = 'createMcpHandler(() => server(e, r))(r, e, c)'
+          if old_call not in s: raise SystemExit('MCP handler marker not found')
+          old_reg = 's.registerTool("analyze_image", { description: "Analyze an image or screenshot as a visual-only observer. It never performs actions.", inputSchema: { image_url: z.string().url().optional(), image_base64: z.string().optional(), prompt: z.string().optional(), model: z.string().optional(), response_format: z.enum(["text", "json"]).optional(), detail: z.enum(["low", "high"]).optional(), language: z.string().optional() } }, async a => analyze(e, r, a));'
+          if old_reg not in s: raise SystemExit('analyze registration marker not found')
+          add = 's.registerTool("get_analysis_job", { description: "Retrieve a temporary asynchronous vision analysis result. Results expire after 30 minutes.", inputSchema: { job_id: z.string().uuid() } }, async ({ job_id }) => { const o = await e.UPLOADS?.get(`temporary/analysis/${job_id}.json`); if (!o) return result({ success: false, error: "Analysis job not found or expired" }, true); return result(JSON.parse(await o.text())); }); '
+          s = s.replace(old_reg, old_reg + ' ' + add, 1)
+          old_health = 'streaming: true }, upstream_tested: false'
+          new_health = 'streaming: true, asynchronous: true, job_ttl_minutes: 30 }, upstream_tested: false'
+          if old_health not in s: raise SystemExit('health marker not found')
+          s = s.replace(old_health, new_health, 1)
+          p.write_text(s)
+          PY
+      - name: Typecheck
+        run: |
+          npm install --ignore-scripts
+          npm run typecheck
+      - name: Commit integration
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/index.ts
+          git commit -m "feat: integrate vision workflow"
+          git push
