@@ -1,15 +1,10 @@
 {
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "steep-bread-85a3",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
-  "r2_buckets": [
-    {
-      "binding": "UPLOADS",
-      "bucket_name": "hi-uploads"
-    }
-  ],
-  "triggers": {
-    "crons": ["*/30 * * * *"]
-  }
+  "r2_buckets": [{"binding":"UPLOADS","bucket_name":"hi-uploads"}],
+  "workflows": [{"name":"vision-analysis","binding":"VISION_ANALYSIS","class_name":"VisionAnalysisWorkflow"}],
+  "triggers": {"crons":["*/30 * * * *"]}
 }
