@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   update:
-    if: github.event.head_commit.message != 'chore: remove temporary vision model updater'
+    if: ${{ !contains(github.event.head_commit.message, 'qwen3.8 max') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
