@@ -1,0 +1,5 @@
+Deployment trigger for the Cloudflare Workers Git integration.
+
+Requested deployment: current main branch.
+Note: local-only changes are not included by this trigger.
+Trigger ID: vision-redeploy-180s-request-01
