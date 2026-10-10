@@ -1,4 +1,4 @@
-name: Replace Gemini with GLM vision model
+name: Configure vision model and workflow status
 
 on:
   workflow_dispatch:
@@ -9,21 +9,23 @@ permissions:
   contents: write
 
 jobs:
-  update-vision-model:
+  configure-vision:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Replace vision model
+      - name: Configure GLM default and quality-speed prompt
         run: |
           python3 - <<'PY'
           from pathlib import Path
           files = [Path('src/index.ts'), Path('src/vision-workflow.ts')]
           replacements = {
-              'google/gemini-3.8-flash': 'z-ai/glm-5.3-flash',
-              'Gemini 3.8 Flash': 'GLM-5.3 Flash',
+              'const DEFAULT_VISION_MODEL="qwen/qwen3.8-max:free"': 'const DEFAULT_VISION_MODEL="z-ai/glm-5.3-flash"',
+              '"z-ai/glm-5.3-flash":"رؤية واستدلال بتكلفة منخفضة؛ تجريبي حتى التحقق من دقته وسرعته"': '"z-ai/glm-5.3-flash":"دقة عالية وسرعة عالية في التحليل البصري"',
+              '"z-ai/glm-5.3-flash":"رؤية واستدلال بتكلفة منخفضة؛ تجريبي حتى التحقق من دقته وسرعته"': '"z-ai/glm-5.3-flash":"دقة عالية وسرعة عالية في التحليل البصري"',
+              'Describe only what is visible. For screenshots include visible text, controls, errors and their locations.': 'Describe only what is visible, accurately and efficiently. Prioritize high-confidence observations, visible text, controls, errors, and their locations. Separate observations from inferences and do not speculate.',
           }
           changed = False
           for path in files:
@@ -35,18 +37,19 @@ jobs:
                   path.write_text(text)
                   changed = True
           if not changed:
-              print('No replacement needed')
+              print('No source replacement needed')
           PY
 
-      - name: Verify model replacement
+      - name: Verify configuration
         run: |
-          grep -R 'z-ai/glm-5.3-flash' src/index.ts src/vision-workflow.ts
-          if grep -R 'google/gemini-3.8-flash' src/index.ts src/vision-workflow.ts; then exit 1; fi
+          grep -R 'DEFAULT_VISION_MODEL="z-ai/glm-5.3-flash"' src/index.ts src/vision-workflow.ts
+          grep -R 'دقة عالية وسرعة عالية' src/index.ts src/vision-workflow.ts
+          if grep -R 'DEFAULT_VISION_MODEL="qwen/qwen3.8-max:free"' src/index.ts src/vision-workflow.ts; then exit 1; fi
 
-      - name: Commit model change
+      - name: Commit source configuration
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/index.ts src/vision-workflow.ts
-          git diff --cached --quiet || git commit -m 'replace Gemini with GLM 5.3 Flash vision model'
+          git diff --cached --quiet || git commit -m 'vision: use GLM default with accuracy-speed prompt'
           git push
