@@ -1,14 +1,13 @@
 import { WorkflowEntrypoint, WorkflowStep } from "cloudflare:workers";
 import type { WorkflowEvent } from "cloudflare:workers";
-
 type Env = { XKIRO_API_KEY?: string; UPLOADS?: R2Bucket };
 type Params = { jobId: string; imageUrl?: string; imageBase64?: string; prompt?: string; model?: string; responseFormat?: "text" | "json"; detail?: "low" | "high"; language?: string };
 const API="https://api.xkiro.com", TTL=30*60*1000, MAX=20*1024*1024, TYPES=new Set(["image/jpeg","image/png","image/webp","image/gif"]);
 const DEFAULT_VISION_MODEL="qwen/qwen3.8-max:free";
 const MODEL_GUIDE={
-  "cohere/command-a-plus":"خفيف وسريع: استخدمه عندما تكون السرعة أهم من الدقة العليا ولا تحتاج المهمة تحليلاً بصرياً عميقاً.",
-  "qwen/qwen3.8-max:free":"دقة عالية مع سرعة متوسطة: الوضع الافتراضي لمعظم مهام الرؤية والتحليل المعتادة.",
-  "google/gemini-3.8-flash":"قوة وسرعة قصوى: استخدمه فقط للمهام الخاصة جداً التي تحتاج أعلى قدرة مع استجابة سريعة."
+"cohere/command-a-plus":"خفيف وسريع: استخدمه عندما تكون السرعة أهم من الدقة العليا ولا تحتاج المهمة تحليلاً بصرياً عميقاً.",
+"qwen/qwen3.8-max:free":"دقة عالية مع سرعة متوسطة: الوضع الافتراضي لمعظم مهام الرؤية والتحليل المعتادة.",
+"z-ai/glm-5.3-flash":"رؤية واستدلال بتكلفة منخفضة؛ تجريبي حتى التحقق من دقته وسرعته"
 } as const;
 const textOf=(x:any):string=>typeof x==="string"?x:Array.isArray(x)?x.map(textOf).filter(Boolean).join("\n"):x&&typeof x==="object"&&"text"in x?textOf(x.text):"";
 const dataUri=(type:string,b:Uint8Array)=>{let s="";for(let i=0;i<b.length;i+=0x8000)s+=String.fromCharCode(...b.subarray(i,Math.min(i+0x8000,b.length)));return `data:${type};base64,${btoa(s)}`};
