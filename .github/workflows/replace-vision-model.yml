@@ -23,7 +23,6 @@ jobs:
           files = [Path('src/index.ts'), Path('src/vision-workflow.ts')]
           replacements = {
               'google/gemini-3.8-flash': 'z-ai/glm-5.3-flash',
-              'google/gemini-3.8-flash\\":\\"قوة وسرعة قصوى': 'z-ai/glm-5.3-flash\\":\\"قوة رؤية واستدلال بسعر منخفض',
               'Gemini 3.8 Flash': 'GLM-5.3 Flash',
           }
           changed = False
@@ -38,6 +37,11 @@ jobs:
           if not changed:
               print('No replacement needed')
           PY
+
+      - name: Verify model replacement
+        run: |
+          grep -R 'z-ai/glm-5.3-flash' src/index.ts src/vision-workflow.ts
+          if grep -R 'google/gemini-3.8-flash' src/index.ts src/vision-workflow.ts; then exit 1; fi
 
       - name: Commit model change
         run: |
