@@ -1,4 +1,4 @@
-name: Configure vision model and workflow status
+name: Configure vision model description
 
 on:
   workflow_dispatch:
@@ -16,16 +16,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure GLM default and quality-speed prompt
+      - name: Keep Qwen default and improve GLM description
         run: |
           python3 - <<'PY'
           from pathlib import Path
           files = [Path('src/index.ts'), Path('src/vision-workflow.ts')]
           replacements = {
-              'const DEFAULT_VISION_MODEL="qwen/qwen3.8-max:free"': 'const DEFAULT_VISION_MODEL="z-ai/glm-5.3-flash"',
-              '"z-ai/glm-5.3-flash":"رؤية واستدلال بتكلفة منخفضة؛ تجريبي حتى التحقق من دقته وسرعته"': '"z-ai/glm-5.3-flash":"دقة عالية وسرعة عالية في التحليل البصري"',
-              '"z-ai/glm-5.3-flash":"رؤية واستدلال بتكلفة منخفضة؛ تجريبي حتى التحقق من دقته وسرعته"': '"z-ai/glm-5.3-flash":"دقة عالية وسرعة عالية في التحليل البصري"',
-              'Describe only what is visible. For screenshots include visible text, controls, errors and their locations.': 'Describe only what is visible, accurately and efficiently. Prioritize high-confidence observations, visible text, controls, errors, and their locations. Separate observations from inferences and do not speculate.',
+              'const DEFAULT_VISION_MODEL="z-ai/glm-5.3-flash"': 'const DEFAULT_VISION_MODEL="qwen/qwen3.8-max:free"',
+              '"z-ai/glm-5.3-flash":"رؤية واستدلال بتكلفة منخفضة؛ تجريبي حتى التحقق من دقته وسرعته"': '"z-ai/glm-5.3-flash":"نموذج يجمع بين القوة والسرعة؛ استخدمه عندما تحتاج دقة عالية مع استجابة سريعة"',
+              '"z-ai/glm-5.3-flash":"دقة عالية وسرعة عالية في التحليل البصري"': '"z-ai/glm-5.3-flash":"نموذج يجمع بين القوة والسرعة؛ استخدمه عندما تحتاج دقة عالية مع استجابة سريعة"',
           }
           changed = False
           for path in files:
@@ -42,14 +41,13 @@ jobs:
 
       - name: Verify configuration
         run: |
-          grep -R 'DEFAULT_VISION_MODEL="z-ai/glm-5.3-flash"' src/index.ts src/vision-workflow.ts
-          grep -R 'دقة عالية وسرعة عالية' src/index.ts src/vision-workflow.ts
-          if grep -R 'DEFAULT_VISION_MODEL="qwen/qwen3.8-max:free"' src/index.ts src/vision-workflow.ts; then exit 1; fi
+          grep -R 'DEFAULT_VISION_MODEL="qwen/qwen3.8-max:free"' src/index.ts src/vision-workflow.ts
+          grep -R 'نموذج يجمع بين القوة والسرعة' src/index.ts src/vision-workflow.ts
 
       - name: Commit source configuration
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/index.ts src/vision-workflow.ts
-          git diff --cached --quiet || git commit -m 'vision: use GLM default with accuracy-speed prompt'
+          git diff --cached --quiet || git commit -m 'vision: keep Qwen default and refine GLM description'
           git push
