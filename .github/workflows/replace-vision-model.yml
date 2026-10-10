@@ -1,0 +1,48 @@
+name: Replace Gemini with GLM vision model
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  update-vision-model:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Replace vision model
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          files = [Path('src/index.ts'), Path('src/vision-workflow.ts')]
+          replacements = {
+              'google/gemini-3.8-flash': 'z-ai/glm-5.3-flash',
+              'google/gemini-3.8-flash\\":\\"قوة وسرعة قصوى': 'z-ai/glm-5.3-flash\\":\\"قوة رؤية واستدلال بسعر منخفض',
+              'Gemini 3.8 Flash': 'GLM-5.3 Flash',
+          }
+          changed = False
+          for path in files:
+              text = path.read_text()
+              original = text
+              for old, new in replacements.items():
+                  text = text.replace(old, new)
+              if text != original:
+                  path.write_text(text)
+                  changed = True
+          if not changed:
+              print('No replacement needed')
+          PY
+
+      - name: Commit model change
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/index.ts src/vision-workflow.ts
+          git diff --cached --quiet || git commit -m 'replace Gemini with GLM 5.3 Flash vision model'
+          git push
